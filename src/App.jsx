@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  AlarmClock,
   Ambulance,
+  Bell,
   BellRing,
   CalendarCheck2,
   Check,
   ChevronRight,
   CircleUserRound,
   ClipboardList,
+  CloudOff,
+  CloudUpload,
   Clock3,
   Frown,
   FileText,
@@ -63,6 +67,9 @@ const defaultData = {
   alert: null,
   emergencyAlert: null,
   emergencyLog: [],
+  syncQueue: [],
+  lastSyncAt: null,
+  notificationSettings: { enabled: false, mode: 'in_app', time: '18:00' },
   emergencyContacts: [
     { id: 'contact-buddy', name: 'মিতালি দাস', relationship: 'সহায়ক', phone: '9830012345', priority: 'primary', canReceiveSOS: true },
     { id: 'contact-son', name: 'রাহুল দেবী', relationship: 'ছেলে', phone: '9000012345', priority: 'primary', canReceiveSOS: true },
@@ -115,6 +122,7 @@ function App() {
   const [healthValues, setHealthValues] = useState(emptyHealthForm);
   const [contactOpen, setContactOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reminderNotice, setReminderNotice] = useState('');
   const [contactValues, setContactValues] = useState({ name: '', relationship: '', phone: '', priority: 'primary' });
   const [onboardingValues, setOnboardingValues] = useState({ displayName: '', phone: '', villageName: '', wardNumber: '' });
   const [buddyValues, setBuddyValues] = useState({ name: '', phone: '', type: 'ASHA সহায়ক' });
@@ -125,6 +133,8 @@ function App() {
   const emergencyContacts = data.emergencyContacts || defaultData.emergencyContacts;
   const healthLogs = data.healthLogs || defaultData.healthLogs;
   const latestHealthLog = healthLogs[0] || null;
+  const notificationSettings = data.notificationSettings || defaultData.notificationSettings;
+  const pendingSyncCount = (data.syncQueue || []).length;
   const elderName = profile?.displayName || 'সরস্বতী দেবী';
   const elderInitial = elderName.trim().charAt(0) || 'স';
 
@@ -143,7 +153,14 @@ function App() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      showToast('ইন্টারনেট ফিরে এসেছে। আপনার তথ্য নিরাপদে সিঙ্ক হবে।');
+      setData((previous) => ({
+        ...previous,
+        syncQueue: [],
+        lastSyncAt: new Date().toISOString(),
+        checkin: previous.checkin ? { ...previous.checkin, syncState: 'synced' } : previous.checkin,
+        healthLogs: (previous.healthLogs || []).map((log) => ({ ...log, syncState: 'synced' })),
+      }));
+      showToast('ইন্টারনেট ফিরে এসেছে। ফোনে রাখা তথ্য সিঙ্ক হয়েছে।');
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -158,6 +175,64 @@ function App() {
   }, [showToast]);
 
   useEffect(() => () => recognitionRef.current?.stop(), []);
+
+  useEffect(() => {
+    const checkReminder = () => {
+      if (!notificationSettings.enabled || hasCheckedIn) return;
+      const now = new Date();
+      const todayKey = now.toISOString().slice(0, 10);
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      if (currentTime !== notificationSettings.time || notificationSettings.lastTriggeredOn === todayKey) return;
+      const message = 'সন্ধ্যা ৬টার আগে আজকের খোঁজ জানিয়ে দিন।';
+      if (notificationSettings.mode === 'browser' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification('Sanket Sneho — আজকের খোঁজ', { body: message, icon: '/favicon.svg' });
+      } else {
+        setReminderNotice(message);
+        window.setTimeout(() => setReminderNotice(''), 6000);
+      }
+      setData((previous) => ({ ...previous, notificationSettings: { ...(previous.notificationSettings || defaultData.notificationSettings), lastTriggeredOn: todayKey } }));
+    };
+    checkReminder();
+    const reminderTimer = window.setInterval(checkReminder, 30000);
+    return () => window.clearInterval(reminderTimer);
+  }, [hasCheckedIn, notificationSettings.enabled, notificationSettings.lastTriggeredOn, notificationSettings.mode, notificationSettings.time]);
+
+  const enqueueOffline = (previous, entity, createdAt) => ({
+    ...previous,
+    syncQueue: isOnline ? (previous.syncQueue || []) : [...(previous.syncQueue || []), { id: `sync-${entity}-${Date.now()}`, entity, createdAt, status: 'waiting' }],
+  });
+
+  const enableLocalReminder = () => {
+    setData((previous) => ({ ...previous, notificationSettings: { ...(previous.notificationSettings || defaultData.notificationSettings), enabled: true, mode: 'in_app', time: '18:00' } }));
+    showToast('In-app reminder চালু হয়েছে।');
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          setData((previous) => ({ ...previous, notificationSettings: { ...(previous.notificationSettings || defaultData.notificationSettings), enabled: true, mode: 'browser', time: '18:00' } }));
+          showToast('Browser notification-ও চালু হয়েছে।');
+        }
+      }).catch(() => {});
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      setData((previous) => ({ ...previous, notificationSettings: { ...(previous.notificationSettings || defaultData.notificationSettings), enabled: true, mode: 'browser', time: '18:00' } }));
+    }
+  };
+
+  const disableLocalReminder = () => {
+    setData((previous) => ({ ...previous, notificationSettings: { ...(previous.notificationSettings || defaultData.notificationSettings), enabled: false } }));
+    setReminderNotice('Reminder বন্ধ করা হয়েছে।');
+    window.setTimeout(() => setReminderNotice(''), 3000);
+  };
+
+  const previewLocalReminder = () => {
+    const message = 'সন্ধ্যা ৬টার আগে আজকের খোঁজ জানিয়ে দিন।';
+    if (notificationSettings.mode === 'browser' && 'Notification' in window && Notification.permission === 'granted') {
+      new Notification('Sanket Sneho — reminder test', { body: message, icon: '/favicon.svg' });
+      showToast('Browser notification test পাঠানো হয়েছে।');
+    } else {
+      setReminderNotice(message);
+      window.setTimeout(() => setReminderNotice(''), 6000);
+    }
+  };
 
   const completeOnboarding = (event) => {
     event.preventDefault();
@@ -211,18 +286,18 @@ function App() {
       diastolic: healthValues.diastolic,
       note: healthValues.note.trim(),
     };
-    setData((previous) => ({ ...previous, healthLogs: [log, ...(previous.healthLogs || [])].slice(0, 14) }));
+    setData((previous) => enqueueOffline({ ...previous, healthLogs: [log, ...(previous.healthLogs || [])].slice(0, 14) }, 'health-log', log.createdAt));
     setHealthValues(emptyHealthForm);
     showToast(isOnline ? 'আজকের স্বাস্থ্য-খোঁজ রাখা হয়েছে।' : 'স্বাস্থ্য-খোঁজ ফোনে রাখা হয়েছে—ইন্টারনেট এলে সিঙ্ক হবে।');
   };
 
   const checkIn = () => {
     const timestamp = new Date().toISOString();
-    setData((previous) => ({
+    setData((previous) => enqueueOffline({
       ...previous,
       checkin: { timestamp, syncState: isOnline ? 'synced' : 'waiting_to_sync' },
       alert: null,
-    }));
+    }, 'checkin', timestamp));
     showToast(isOnline ? 'আজকের খোঁজ জানানো হয়েছে। ভালো থাকুন।' : 'চেক-ইন ফোনে রাখা হয়েছে—ইন্টারনেট এলে পাঠানো হবে।');
   };
 
@@ -263,7 +338,8 @@ function App() {
       showToast('সহায়কের নাম এবং ফোন নম্বর লিখুন।');
       return;
     }
-    setData((previous) => ({ ...previous, buddy: { ...cleaned, assignedAt: new Date().toISOString() }, emergencyContacts: (previous.emergencyContacts || []).map((contact) => contact.relationship === 'সহায়ক' ? { ...contact, name: cleaned.name, phone: cleaned.phone } : contact) }));
+    const updatedAt = new Date().toISOString();
+    setData((previous) => enqueueOffline({ ...previous, buddy: { ...cleaned, assignedAt: updatedAt }, emergencyContacts: (previous.emergencyContacts || []).map((contact) => contact.relationship === 'সহায়ক' ? { ...contact, name: cleaned.name, phone: cleaned.phone } : contact) }, 'buddy', updatedAt));
     setAssignmentOpen(false);
     showToast(`${cleaned.name}-কে আপনার সহায়ক হিসেবে রাখা হয়েছে।`);
   };
@@ -281,13 +357,13 @@ function App() {
       return;
     }
     const newContact = { ...cleaned, id: `contact-${Date.now()}`, canReceiveSOS: true };
-    setData((previous) => ({ ...previous, emergencyContacts: [...(previous.emergencyContacts || []), newContact] }));
+    setData((previous) => enqueueOffline({ ...previous, emergencyContacts: [...(previous.emergencyContacts || []), newContact] }, 'emergency-contact', newContact.id));
     setContactOpen(false);
     showToast(`${cleaned.name}-কে emergency contact হিসেবে রাখা হয়েছে।`);
   };
 
   const removeEmergencyContact = (contactId) => {
-    setData((previous) => ({ ...previous, emergencyContacts: (previous.emergencyContacts || []).filter((contact) => contact.id !== contactId) }));
+    setData((previous) => enqueueOffline({ ...previous, emergencyContacts: (previous.emergencyContacts || []).filter((contact) => contact.id !== contactId) }, 'emergency-contact-remove', contactId));
     showToast('Emergency contact সরানো হয়েছে।');
   };
 
@@ -340,16 +416,17 @@ function App() {
       id: `${type}-${Date.now()}`,
       type,
       createdAt: sentAt,
+      syncState: isOnline ? 'synced' : 'waiting_to_sync',
       locationState: location.state,
       coordinates: location.coordinates || null,
       recipients,
     };
-    setData((previous) => ({
+    setData((previous) => enqueueOffline({
       ...previous,
       emergencyAlert: { ...entry, status: 'sent', acknowledgedBy: [] },
       emergencyLog: [entry, ...previous.emergencyLog].slice(0, 8),
       alert: { type, status: 'sent', createdAt: sentAt },
-    }));
+    }, 'emergency-alert', sentAt));
     setEmergencySending(false);
     setModal(null);
     showToast(type === 'sos' ? 'SOS alert মিতালি দি ও পরিবারকে পাঠানো হয়েছে।' : 'অ্যাম্বুলেন্সের alert প্রস্তুত হয়েছে।');
@@ -555,7 +632,8 @@ function App() {
       <div className="profile-card"><div className="profile-avatar">{elderInitial}</div><div><h3 className="text-xl font-bold text-slate-900">{elderName}</h3><p className="mt-1 text-sm text-slate-500">Elder profile • Gazole, Malda</p></div><button className="icon-button ml-auto" aria-label="প্রোফাইল তথ্য"><Info size={19} /></button></div>
       <div className="info-card buddy-profile-card"><div className="buddy-avatar">{buddy.name.trim().charAt(0) || 'মি'}</div><div className="flex-1"><p className="eyebrow text-slate-400">আমার পাশে আছেন</p><p className="mt-2 font-bold text-slate-900">{buddy.name}</p><p className="mt-1 text-sm text-slate-500">{buddy.type} • {buddy.phone}</p></div><div className="buddy-card-actions"><a href={`tel:${buddy.phone}`} className="call-button" aria-label={`${buddy.name}-কে কল করুন`}><Phone size={19} /></a><button className="edit-buddy-button" onClick={openBuddyEditor}>বদলান</button></div></div>
       <div className="privacy-note"><ShieldCheck size={20} className="mt-0.5 shrink-0 text-teal-700" /><p><strong>আপনার তথ্য ব্যক্তিগত।</strong><br />শুধু আপনার সহায়ক ও নিবন্ধিত পরিবারের সদস্যরা আপনার নিরাপত্তার খবর দেখতে পারবেন।</p></div>
-      <div className="info-card flex items-center gap-3"><div className={`mini-icon ${isOnline ? 'mini-icon-teal' : 'mini-icon-amber'}`}>{isOnline ? <Wifi size={21} /> : <WifiOff size={21} />}</div><div><p className="font-bold text-slate-900">সংযোগের অবস্থা</p><p className="mt-1 text-sm text-slate-500">{isOnline ? 'ইন্টারনেট সংযুক্ত' : 'অফলাইন • তথ্য ফোনে রাখা হচ্ছে'}</p></div></div>
+      <div className="info-card flex items-center gap-3"><div className={`mini-icon ${isOnline ? 'mini-icon-teal' : 'mini-icon-amber'}`}>{isOnline ? <Wifi size={21} /> : <WifiOff size={21} />}</div><div className="min-w-0 flex-1"><p className="font-bold text-slate-900">সংযোগ ও সিঙ্ক</p><p className="mt-1 text-sm text-slate-500">{isOnline ? (pendingSyncCount ? `${pendingSyncCount}টি তথ্য সিঙ্ক হওয়ার অপেক্ষায়` : data.lastSyncAt ? `শেষ সিঙ্ক: ${formatTime(data.lastSyncAt)}` : 'ইন্টারনেট সংযুক্ত') : `অফলাইন • ${pendingSyncCount}টি তথ্য ফোনে রাখা হচ্ছে`}</p></div>{pendingSyncCount > 0 ? <CloudOff className="text-amber-600" size={20} /> : <CloudUpload className="text-teal-600" size={20} />}</div>
+      <div className="notification-settings-card"><div className="notification-settings-copy"><div className="mini-icon mini-icon-amber"><AlarmClock size={21} /></div><div><p className="font-bold text-slate-900">দৈনিক reminder</p><p className="mt-1 text-sm text-slate-500">প্রতিদিন সন্ধ্যা ৬টায় আজকের খোঁজ মনে করিয়ে দিন।</p><small>{notificationSettings.enabled ? (notificationSettings.mode === 'browser' ? 'Browser notification চালু' : 'In-app reminder চালু') : 'এখন বন্ধ'}</small></div></div><div className="notification-actions">{notificationSettings.enabled ? <><button className="secondary-button" onClick={previewLocalReminder}><Bell size={16} /> test</button><button className="remove-contact-button" onClick={disableLocalReminder} aria-label="reminder বন্ধ করুন">বন্ধ</button></> : <button className="primary-small-button" onClick={enableLocalReminder}><Bell size={16} /> চালু করুন</button>}</div></div>
     </section>
   );
 
@@ -564,7 +642,7 @@ function App() {
       <div className="app-shell">
         <header className="topbar">
           <div className="brand-lockup"><div className="brand-mark"><HeartPulse size={22} strokeWidth={2.4} /></div><div><p className="brand-name">সংকেত স্নেহ</p><p className="brand-subtitle">Sanket Sneho</p></div></div>
-          <div className="topbar-actions"><span className={`connection-pill ${isOnline ? 'online' : 'offline'}`}>{isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}{isOnline ? 'অনলাইন' : 'অফলাইন'}</span><button className="profile-chip" onClick={() => setTab('profile')} aria-label="প্রোফাইল খুলুন"><CircleUserRound size={22} /></button></div>
+          <div className="topbar-actions"><span className={`connection-pill ${isOnline ? 'online' : 'offline'}`}>{isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}{isOnline ? 'অনলাইন' : 'অফলাইন'}</span>{pendingSyncCount > 0 && <span className="sync-pill"><CloudOff size={13} /> {pendingSyncCount}টি অপেক্ষায়</span>}{pendingSyncCount === 0 && data.lastSyncAt && <span className="sync-pill synced"><CloudUpload size={13} /> সিঙ্ক হয়েছে</span>}<button className="profile-chip" onClick={() => setTab('profile')} aria-label="প্রোফাইল খুলুন"><CircleUserRound size={22} /></button></div>
         </header>
 
         <main className={`main-content ${!profile ? 'onboarding-content' : ''}`}>
@@ -583,6 +661,7 @@ function App() {
         <footer className="app-footer"><span>{APP_VERSION}</span><span className="footer-divider" /><span>গাজোল পাইলট</span></footer>
       </div>
 
+      {reminderNotice && <div className="reminder-banner" role="status"><AlarmClock size={18} /><span>{reminderNotice}</span><button onClick={() => setReminderNotice('')} aria-label="reminder বন্ধ করুন"><X size={16} /></button></div>}
       {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
 
       {assignmentOpen && <div className="modal-backdrop" role="presentation" onClick={() => setAssignmentOpen(false)}><form className="modal-card assignment-modal" onSubmit={saveBuddyAssignment} onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setAssignmentOpen(false)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol modal-symbol-teal"><UsersRound size={30} /></div><p className="eyebrow mt-5 text-teal-700">সহায়ক assignment</p><h2 className="mt-2 text-2xl font-bold text-slate-900">আপনার সহায়ক বদলান</h2><p className="mt-3 text-sm leading-6 text-slate-600">যিনি নিয়মিত আপনার খবর নিতে পারবেন, তাঁর তথ্য এখানে রাখুন।</p><label className="modal-form-field"><span>সহায়কের নাম</span><input value={buddyValues.name} onChange={(event) => setBuddyValues((previous) => ({ ...previous, name: event.target.value }))} placeholder="যেমন: মিতালি দাস" /></label><label className="modal-form-field"><span>ফোন নম্বর</span><input value={buddyValues.phone} onChange={(event) => setBuddyValues((previous) => ({ ...previous, phone: event.target.value }))} placeholder="১০ অঙ্কের ফোন নম্বর" inputMode="tel" /></label><label className="modal-form-field"><span>সহায়কের ধরন</span><select value={buddyValues.type} onChange={(event) => setBuddyValues((previous) => ({ ...previous, type: event.target.value }))}><option>ASHA সহায়ক</option><option>Anganwadi কর্মী</option><option>স্থানীয় volunteer</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssignmentOpen(false)}>এখন নয়</button><button type="submit" className="primary-small-button">তথ্য রাখুন</button></div></form></div>}
