@@ -35,6 +35,7 @@ const defaultData = {
   familyContact: { name: 'রাহুল দেবী', relationship: 'ছেলে', phone: '9000012345' },
   checkin: null,
   alert: null,
+  emergencyAlert: null,
   emergencyLog: [],
 };
 
@@ -79,6 +80,7 @@ function App() {
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState(null);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [emergencySending, setEmergencySending] = useState(false);
   const [onboardingValues, setOnboardingValues] = useState({ displayName: '', phone: '', villageName: '', wardNumber: '' });
   const [buddyValues, setBuddyValues] = useState({ name: '', phone: '', type: 'ASHA সহায়ক' });
   const recognitionRef = useRef(null);
@@ -185,15 +187,45 @@ function App() {
     showToast(`${cleaned.name}-কে আপনার সহায়ক হিসেবে রাখা হয়েছে।`);
   };
 
-  const sendEmergency = (type) => {
-    const entry = { type, createdAt: new Date().toISOString(), locationShared: isOnline };
+  const commitEmergencyAlert = (type, location) => {
+    const sentAt = new Date().toISOString();
+    const recipients = [
+      { role: 'buddy', name: buddy.name, phone: buddy.phone, status: 'sent' },
+      { role: 'family', name: familyContact.name, phone: familyContact.phone, status: 'sent' },
+    ];
+    const entry = {
+      id: `${type}-${Date.now()}`,
+      type,
+      createdAt: sentAt,
+      locationState: location.state,
+      coordinates: location.coordinates || null,
+      recipients,
+    };
     setData((previous) => ({
       ...previous,
+      emergencyAlert: { ...entry, status: 'sent', acknowledgedBy: [] },
       emergencyLog: [entry, ...previous.emergencyLog].slice(0, 8),
-      alert: { type, status: 'sent', createdAt: entry.createdAt },
+      alert: { type, status: 'sent', createdAt: sentAt },
     }));
+    setEmergencySending(false);
     setModal(null);
-    showToast(type === 'sos' ? 'SOS সতর্কবার্তা পাঠানো হয়েছে।' : 'অ্যাম্বুলেন্সের জন্য প্রস্তুত করা হয়েছে।');
+    showToast(type === 'sos' ? 'SOS alert মিতালি দি ও পরিবারকে পাঠানো হয়েছে।' : 'অ্যাম্বুলেন্সের alert প্রস্তুত হয়েছে।');
+  };
+
+  const sendEmergency = (type) => {
+    setEmergencySending(true);
+    if (!navigator.geolocation) {
+      commitEmergencyAlert(type, { state: 'unavailable' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => commitEmergencyAlert(type, {
+        state: 'shared',
+        coordinates: { latitude: position.coords.latitude, longitude: position.coords.longitude },
+      }),
+      () => commitEmergencyAlert(type, { state: 'not_shared' }),
+      { enableHighAccuracy: false, timeout: 2500, maximumAge: 30000 },
+    );
   };
 
   const toggleVoice = () => {
@@ -339,7 +371,7 @@ function App() {
       <div className="page-title-block"><p className="eyebrow text-teal-700">আপনার রেকর্ড</p><h2 className="mt-1 text-3xl font-bold text-slate-900">কার্যকলাপ</h2><p className="mt-2 text-sm leading-6 text-slate-500">আপনার check-in এবং নিরাপত্তা সতর্কবার্তার সাম্প্রতিক তথ্য।</p></div>
       <div className="info-card flex items-start gap-4"><div className="mini-icon mini-icon-teal"><ShieldCheck size={22} /></div><div><p className="font-bold text-slate-900">আজকের check-in</p><p className="mt-1 text-sm text-slate-500">{hasCheckedIn ? `${formatDate(data.checkin.timestamp)}, ${formatTime(data.checkin.timestamp)}` : 'আজ এখনও check-in করা হয়নি'}</p><span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${hasCheckedIn ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>{hasCheckedIn ? 'সম্পন্ন' : 'অপেক্ষায়'}</span></div></div>
       {data.alert && <div className="info-card flex items-start gap-4"><div className={`mini-icon ${data.alert.status === 'family_escalated' ? 'mini-icon-red' : data.alert.status === 'buddy_acknowledged' ? 'mini-icon-teal' : 'mini-icon-amber'}`}><BellRing size={22} /></div><div className="min-w-0 flex-1"><p className="font-bold text-slate-900">সহায়কের সতর্কবার্তা</p><p className="mt-1 text-sm text-slate-500">{formatDate(data.alert.createdAt)} • {formatTime(data.alert.createdAt)}</p><span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${data.alert.status === 'buddy_acknowledged' ? 'bg-teal-50 text-teal-700' : data.alert.status === 'family_escalated' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{data.alert.status === 'buddy_acknowledged' ? 'সহায়ক খবর নিয়েছেন' : data.alert.status === 'family_escalated' ? 'পরিবারকে জানানো হয়েছে' : 'সহায়কের উত্তর অপেক্ষায়'}</span>{data.alert.status === 'family_escalated' && <p className="mt-2 text-xs font-semibold text-red-700">{familyContact.name} ({familyContact.relationship})-কে সতর্ক করা হয়েছে।</p>}</div></div>}
-      {data.emergencyLog.length > 0 && <div className="info-card"><div className="flex items-center gap-3"><div className="mini-icon mini-icon-red"><Siren size={22} /></div><div><p className="font-bold text-slate-900">জরুরি সতর্কবার্তা</p><p className="mt-1 text-sm text-slate-500">সর্বশেষ {formatTime(data.emergencyLog[0].createdAt)} • {data.emergencyLog[0].type === 'sos' ? 'SOS' : 'অ্যাম্বুলেন্স'}</p></div></div></div>}
+      {data.emergencyLog.length > 0 && <div className="info-card emergency-history-card"><div className="mini-icon mini-icon-red"><Siren size={22} /></div><div className="min-w-0 flex-1"><p className="font-bold text-slate-900">{data.emergencyLog[0].type === 'sos' ? 'SOS alert পাঠানো হয়েছে' : 'অ্যাম্বুলেন্স alert প্রস্তুত'}</p><p className="mt-1 text-sm text-slate-500">{formatDate(data.emergencyLog[0].createdAt)} • {formatTime(data.emergencyLog[0].createdAt)}</p><div className="mt-3 flex flex-wrap gap-2"><span className="emergency-chip"><Check size={13} /> buddy + পরিবার notified</span><span className={`emergency-chip ${data.emergencyLog[0].locationState === 'shared' ? 'location-shared' : ''}`}><LocateFixed size={13} /> {data.emergencyLog[0].locationState === 'shared' ? 'GPS location shared' : data.emergencyLog[0].locationState === 'not_shared' ? 'GPS share হয়নি' : 'GPS unavailable'}</span></div></div></div>}
       <div className="test-card"><div className="flex items-start gap-3"><div className="mini-icon mini-icon-slate"><RefreshCw size={21} /></div><div><p className="font-bold text-slate-900">পরীক্ষার জন্য buddy alert</p><p className="mt-1 text-sm leading-6 text-slate-500">{buddy.name}-এর উত্তর না এলে পরিবারের সদস্যকে সতর্ক করার flow যাচাই করুন।</p></div></div><div className="mt-4 flex flex-wrap gap-2"><button className="secondary-button" onClick={simulateMissedCheckIn}>মিসড check-in দেখুন</button>{data.alert?.status === 'awaiting_buddy' && <><button className="primary-small-button" onClick={acknowledgeBuddy}>সহায়ক উত্তর দিয়েছেন</button><button className="escalate-button" onClick={escalateToFamily}>পরিবারকে জানান</button></>}{data.alert?.status === 'family_escalated' && <button className="secondary-button" onClick={acknowledgeBuddy}>সহায়ক পরে উত্তর দিয়েছেন</button>}</div></div>
     </section>
   );
@@ -380,7 +412,7 @@ function App() {
 
       {assignmentOpen && <div className="modal-backdrop" role="presentation" onClick={() => setAssignmentOpen(false)}><form className="modal-card assignment-modal" onSubmit={saveBuddyAssignment} onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setAssignmentOpen(false)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol modal-symbol-teal"><UsersRound size={30} /></div><p className="eyebrow mt-5 text-teal-700">সহায়ক assignment</p><h2 className="mt-2 text-2xl font-bold text-slate-900">আপনার সহায়ক বদলান</h2><p className="mt-3 text-sm leading-6 text-slate-600">যিনি নিয়মিত আপনার খবর নিতে পারবেন, তাঁর তথ্য এখানে রাখুন।</p><label className="modal-form-field"><span>সহায়কের নাম</span><input value={buddyValues.name} onChange={(event) => setBuddyValues((previous) => ({ ...previous, name: event.target.value }))} placeholder="যেমন: মিতালি দাস" /></label><label className="modal-form-field"><span>ফোন নম্বর</span><input value={buddyValues.phone} onChange={(event) => setBuddyValues((previous) => ({ ...previous, phone: event.target.value }))} placeholder="১০ অঙ্কের ফোন নম্বর" inputMode="tel" /></label><label className="modal-form-field"><span>সহায়কের ধরন</span><select value={buddyValues.type} onChange={(event) => setBuddyValues((previous) => ({ ...previous, type: event.target.value }))}><option>ASHA সহায়ক</option><option>Anganwadi কর্মী</option><option>স্থানীয় volunteer</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssignmentOpen(false)}>এখন নয়</button><button type="submit" className="primary-small-button">তথ্য রাখুন</button></div></form></div>}
 
-      {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal(null)}><div className={`modal-card ${modal === 'ambulance' ? 'modal-amber' : 'modal-red'}`} role="dialog" aria-modal="true" aria-labelledby="emergency-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setModal(null)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol">{modal === 'ambulance' ? <Ambulance size={32} /> : <LifeBuoy size={32} />}</div><p className="eyebrow mt-5">জরুরি সাহায্য</p><h2 id="emergency-title" className="mt-2 text-2xl font-bold text-slate-900">{modal === 'ambulance' ? 'অ্যাম্বুলেন্স প্রয়োজন?' : 'আপনার কি এখনই সাহায্য দরকার?'}</h2><p className="mt-3 text-sm leading-6 text-slate-600">{modal === 'ambulance' ? 'এই flow-টি আপনার সহায়ক ও পরিবারকে জানাবে। এরপর আপনি ১০৮-এ ফোন করার সুযোগ পাবেন।' : 'আপনার সহায়ক এবং নিবন্ধিত পরিবারের সদস্যদের সতর্কবার্তা পাঠানো হবে।'}</p><div className="location-note"><LocateFixed size={18} /><span>{isOnline ? 'GPS অবস্থান পাওয়া গেলে সতর্কবার্তার সঙ্গে যাবে' : 'অফলাইন—GPS না গেলে ফোনে সাহায্য নিন'}</span></div><div className="modal-actions"><button className="secondary-button" onClick={() => setModal(null)}>এখন নয়</button><button className="danger-button" onClick={() => sendEmergency(modal)}>{modal === 'ambulance' ? 'সতর্ক করে ১০৮ দেখান' : 'সাহায্য পাঠান'}</button></div>{modal === 'ambulance' && <a className="call-108-link" href="tel:108"><Phone size={17} /> ১০৮-এ ফোন করুন</a>}</div></div>}
+      {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal(null)}><div className={`modal-card ${modal === 'ambulance' ? 'modal-amber' : 'modal-red'}`} role="dialog" aria-modal="true" aria-labelledby="emergency-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setModal(null)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol">{modal === 'ambulance' ? <Ambulance size={32} /> : <LifeBuoy size={32} />}</div><p className="eyebrow mt-5">জরুরি সাহায্য</p><h2 id="emergency-title" className="mt-2 text-2xl font-bold text-slate-900">{modal === 'ambulance' ? 'অ্যাম্বুলেন্স প্রয়োজন?' : 'আপনার কি এখনই সাহায্য দরকার?'}</h2><p className="mt-3 text-sm leading-6 text-slate-600">{modal === 'ambulance' ? 'এই flow-টি আপনার সহায়ক ও পরিবারকে জানাবে। এরপর আপনি ১০৮-এ ফোন করার সুযোগ পাবেন।' : 'একবার confirm করলে আপনার buddy এবং নিবন্ধিত পরিবারের সদস্য—দুজনকেই সঙ্গে সঙ্গে alert পাঠানো হবে।'}</p>{modal === 'sos' && <div className="recipient-preview"><div><UsersRound size={16} /><span>সহায়ক</span><strong>{buddy.name}</strong></div><div><CircleUserRound size={16} /><span>পরিবার</span><strong>{familyContact.name}</strong></div></div>}<div className="location-note"><LocateFixed size={18} /><span>{isOnline ? 'GPS permission দিলে অবস্থান alert-এর সঙ্গে যাবে; না দিলেও alert যাবে' : 'অফলাইন—alert ফোনে রাখা হবে, GPS না গেলে ফোনে সাহায্য নিন'}</span></div><div className="modal-actions"><button className="secondary-button" onClick={() => setModal(null)}>এখন নয়</button><button className="danger-button" onClick={() => sendEmergency(modal)} disabled={emergencySending}>{emergencySending ? 'পাঠানো হচ্ছে…' : modal === 'ambulance' ? 'সতর্ক করে ১০৮ দেখান' : 'দুজনকেই alert করুন'}</button></div>{modal === 'ambulance' && <a className="call-108-link" href="tel:108"><Phone size={17} /> ১০৮-এ ফোন করুন</a>}</div></div>}
     </div>
   );
 }
