@@ -7,8 +7,10 @@ import {
   Check,
   ChevronRight,
   CircleUserRound,
+  ClipboardList,
   Clock3,
   Frown,
+  FileText,
   HeartPulse,
   Home,
   Info,
@@ -20,10 +22,12 @@ import {
   MicOff,
   Phone,
   RefreshCw,
+  ShieldAlert,
   ShieldCheck,
   Siren,
   Smile,
   Thermometer,
+  UserPlus,
   UsersRound,
   Wifi,
   WifiOff,
@@ -59,6 +63,10 @@ const defaultData = {
   alert: null,
   emergencyAlert: null,
   emergencyLog: [],
+  emergencyContacts: [
+    { id: 'contact-buddy', name: 'মিতালি দাস', relationship: 'সহায়ক', phone: '9830012345', priority: 'primary', canReceiveSOS: true },
+    { id: 'contact-son', name: 'রাহুল দেবী', relationship: 'ছেলে', phone: '9000012345', priority: 'primary', canReceiveSOS: true },
+  ],
   healthLogs: [],
 };
 
@@ -105,13 +113,17 @@ function App() {
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [emergencySending, setEmergencySending] = useState(false);
   const [healthValues, setHealthValues] = useState(emptyHealthForm);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [contactValues, setContactValues] = useState({ name: '', relationship: '', phone: '', priority: 'primary' });
   const [onboardingValues, setOnboardingValues] = useState({ displayName: '', phone: '', villageName: '', wardNumber: '' });
   const [buddyValues, setBuddyValues] = useState({ name: '', phone: '', type: 'ASHA সহায়ক' });
   const recognitionRef = useRef(null);
   const profile = data.profile || null;
   const buddy = data.buddy || defaultData.buddy;
   const familyContact = data.familyContact || defaultData.familyContact;
-  const healthLogs = data.healthLogs || [];
+  const emergencyContacts = data.emergencyContacts || defaultData.emergencyContacts;
+  const healthLogs = data.healthLogs || defaultData.healthLogs;
   const latestHealthLog = healthLogs[0] || null;
   const elderName = profile?.displayName || 'সরস্বতী দেবী';
   const elderInitial = elderName.trim().charAt(0) || 'স';
@@ -251,17 +263,79 @@ function App() {
       showToast('সহায়কের নাম এবং ফোন নম্বর লিখুন।');
       return;
     }
-    setData((previous) => ({ ...previous, buddy: { ...cleaned, assignedAt: new Date().toISOString() } }));
+    setData((previous) => ({ ...previous, buddy: { ...cleaned, assignedAt: new Date().toISOString() }, emergencyContacts: (previous.emergencyContacts || []).map((contact) => contact.relationship === 'সহায়ক' ? { ...contact, name: cleaned.name, phone: cleaned.phone } : contact) }));
     setAssignmentOpen(false);
     showToast(`${cleaned.name}-কে আপনার সহায়ক হিসেবে রাখা হয়েছে।`);
   };
 
+  const openContactEditor = () => {
+    setContactValues({ name: '', relationship: '', phone: '', priority: 'secondary' });
+    setContactOpen(true);
+  };
+
+  const saveEmergencyContact = (event) => {
+    event.preventDefault();
+    const cleaned = Object.fromEntries(Object.entries(contactValues).map(([key, value]) => [key, value.trim()]));
+    if (!cleaned.name || !cleaned.relationship || !cleaned.phone) {
+      showToast('নাম, সম্পর্ক এবং ফোন নম্বর লিখুন।');
+      return;
+    }
+    const newContact = { ...cleaned, id: `contact-${Date.now()}`, canReceiveSOS: true };
+    setData((previous) => ({ ...previous, emergencyContacts: [...(previous.emergencyContacts || []), newContact] }));
+    setContactOpen(false);
+    showToast(`${cleaned.name}-কে emergency contact হিসেবে রাখা হয়েছে।`);
+  };
+
+  const removeEmergencyContact = (contactId) => {
+    setData((previous) => ({ ...previous, emergencyContacts: (previous.emergencyContacts || []).filter((contact) => contact.id !== contactId) }));
+    showToast('Emergency contact সরানো হয়েছে।');
+  };
+
+  const healthReport = useMemo(() => {
+    const reportLines = [
+      'SANKET SNEHO — HEALTH SUMMARY (TEST MODE)',
+      'স্বাস্থ্য summary • এটি diagnosis বা treatment advice নয়',
+      '',
+      `ব্যবহারকারী: ${elderName}`,
+      `গ্রাম: ${profile?.villageName || 'নথিভুক্ত নয়'}`,
+      `সহায়ক: ${buddy.name} • ${buddy.phone}`,
+      `নথি তৈরির সময়: ${formatDate(new Date().toISOString())}, ${formatTime(new Date().toISOString())}`,
+      `মোট record: ${healthLogs.length}টি`,
+      '',
+      'সাম্প্রতিক record:',
+    ];
+    if (healthLogs.length === 0) reportLines.push('কোনো health record এখনও রাখা হয়নি।');
+    healthLogs.slice(0, 14).forEach((log, index) => {
+      const routine = [log.sleep === 'yes' && 'ঘুম', log.appetite === 'yes' && 'খাবার', log.medicine === 'yes' && 'ওষুধ'].filter(Boolean).join(' • ') || 'routine record নেই';
+      const vitals = [log.temperature && `তাপমাত্রা ${log.temperature}°C`, log.pulse && `pulse ${log.pulse}`, log.systolic && log.diastolic && `BP ${log.systolic}/${log.diastolic}`].filter(Boolean).join(' • ') || 'optional vitals নেই';
+      reportLines.push(`${index + 1}. ${formatDate(log.createdAt)} • mood: ${log.moodLabel}`);
+      reportLines.push(`   routine: ${routine}`);
+      reportLines.push(`   মাপ: ${vitals}`);
+      if (log.note) reportLines.push(`   নোট: ${log.note}`);
+    });
+    reportLines.push('', 'নোট: এই report ব্যবহারকারীর নিজস্ব entry-র সারাংশ। গুরুত্বপূর্ণ স্বাস্থ্য সিদ্ধান্তের জন্য qualified clinician-এর সঙ্গে কথা বলুন।');
+    return reportLines.join('\n');
+  }, [buddy.name, buddy.phone, elderName, healthLogs, profile?.villageName]);
+
+  const downloadHealthReport = () => {
+    const blob = new Blob([healthReport], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `sanket-sneho-health-summary-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    showToast('Health summary report download শুরু হয়েছে।');
+  };
+
   const commitEmergencyAlert = (type, location) => {
     const sentAt = new Date().toISOString();
-    const recipients = [
-      { role: 'buddy', name: buddy.name, phone: buddy.phone, status: 'sent' },
-      { role: 'family', name: familyContact.name, phone: familyContact.phone, status: 'sent' },
-    ];
+    const recipients = (emergencyContacts.filter((contact) => contact.canReceiveSOS !== false).length > 0 ? emergencyContacts.filter((contact) => contact.canReceiveSOS !== false) : [
+      { relationship: 'সহায়ক', name: buddy.name, phone: buddy.phone },
+      { relationship: familyContact.relationship, name: familyContact.name, phone: familyContact.phone },
+    ]).map((contact) => ({ role: contact.relationship === 'সহায়ক' ? 'buddy' : 'family', name: contact.name, phone: contact.phone, status: 'sent' }));
     const entry = {
       id: `${type}-${Date.now()}`,
       type,
@@ -454,6 +528,17 @@ function App() {
     </section>
   );
 
+  const renderFamily = () => (
+    <section className="space-y-4">
+      <div className="page-title-block"><p className="eyebrow text-teal-700">সহযোগী dashboard</p><h2 className="mt-1 text-3xl font-bold text-slate-900">পরিবারের জন্য</h2><p className="mt-2 text-sm leading-6 text-slate-500">{elderName}-এর নিরাপত্তা ও wellness record এক জায়গায় দেখুন।</p></div>
+      <div className="family-dashboard-hero"><div className="family-hero-icon"><UsersRound size={24} /></div><div className="min-w-0 flex-1"><p className="eyebrow text-teal-100">বর্তমান safety status</p><h3 className="mt-1 text-xl font-bold text-white">{data.alert?.status === 'family_escalated' ? 'পরিবারকে সতর্ক করা হয়েছে' : data.emergencyAlert?.status === 'sent' ? 'জরুরি alert পাঠানো হয়েছে' : hasCheckedIn ? 'আজকের check-in সম্পন্ন' : 'আজকের check-in অপেক্ষায়'}</h3><p className="mt-1 text-sm text-teal-50/80">{hasCheckedIn ? `শেষ check-in: ${formatTime(data.checkin.timestamp)}` : 'সন্ধ্যা ৬টার আগে elder-এর খবর নিন'}</p></div><span className="family-live-pill"><span /> live view</span></div>
+      <div className="family-glance-grid"><div className="family-glance-card"><div className="mini-icon mini-icon-teal"><HeartPulse size={20} /></div><span>আজকের mood</span><strong>{latestHealthLog?.moodLabel || 'এখনও লেখা হয়নি'}</strong></div><div className="family-glance-card"><div className="mini-icon mini-icon-amber"><ClipboardList size={20} /></div><span>health records</span><strong>{healthLogs.length}টি</strong></div></div>
+      <div className="family-alert-card"><div className="mini-icon mini-icon-red"><ShieldAlert size={21} /></div><div className="min-w-0 flex-1"><p className="font-bold text-slate-900">সর্বশেষ নিরাপত্তা update</p><p className="mt-1 text-sm leading-6 text-slate-600">{data.emergencyAlert?.status === 'sent' ? `SOS alert ${formatTime(data.emergencyAlert.createdAt)}-এ ${data.emergencyAlert.recipients.length} জন contact-কে পাঠানো হয়েছে।` : data.alert?.status === 'family_escalated' ? `${familyContact.name}-এর কাছে family escalation পাঠানো হয়েছে।` : 'কোনো নতুন emergency update নেই।'}</p></div></div>
+      <div className="family-panel"><div className="section-heading"><div><p className="eyebrow text-teal-700">Emergency contacts</p><h3 className="mt-1 text-xl font-bold text-slate-900">কারা খবর পাবেন?</h3></div><button className="add-contact-button" onClick={openContactEditor}><UserPlus size={17} /> যোগ করুন</button></div><div className="contact-list">{emergencyContacts.map((contact) => <div className="contact-row" key={contact.id}><div className={`contact-avatar ${contact.relationship === 'সহায়ক' ? 'contact-avatar-teal' : 'contact-avatar-amber'}`}>{contact.name.trim().charAt(0) || 'ক'}</div><div className="min-w-0 flex-1"><strong>{contact.name}</strong><span>{contact.relationship} • {contact.phone}</span><small><ShieldCheck size={12} /> SOS alert পাবেন</small></div><div className="contact-actions"><a href={`tel:${contact.phone}`} className="call-button" aria-label={`${contact.name}-কে কল করুন`}><Phone size={17} /></a>{contact.priority !== 'primary' && <button className="remove-contact-button" onClick={() => removeEmergencyContact(contact.id)} aria-label={`${contact.name}-কে সরান`}><X size={16} /></button>}</div></div>)}</div></div>
+      <div className="family-panel report-cta"><div className="report-icon"><FileText size={22} /></div><div className="min-w-0 flex-1"><p className="eyebrow text-teal-700">wellness summary</p><h3 className="mt-1 text-lg font-bold text-slate-900">Health summary report</h3><p className="mt-1 text-sm leading-6 text-slate-500">সাম্প্রতিক mood, routine এবং user-entered vitals-এর plain-text summary দেখুন বা download করুন।</p></div><button className="health-open-button" onClick={() => setReportOpen(true)}><FileText size={17} /><span>রিপোর্ট</span></button></div>
+    </section>
+  );
+
   const renderActivity = () => (
     <section className="space-y-4">
       <div className="page-title-block"><p className="eyebrow text-teal-700">আপনার রেকর্ড</p><h2 className="mt-1 text-3xl font-bold text-slate-900">কার্যকলাপ</h2><p className="mt-2 text-sm leading-6 text-slate-500">আপনার check-in এবং নিরাপত্তা সতর্কবার্তার সাম্প্রতিক তথ্য।</p></div>
@@ -486,12 +571,13 @@ function App() {
           {!profile && renderOnboarding()}
           {profile && tab === 'home' && renderHome()}
           {profile && tab === 'health' && renderHealth()}
+          {profile && tab === 'family' && renderFamily()}
           {profile && tab === 'activity' && renderActivity()}
           {profile && tab === 'profile' && renderProfile()}
         </main>
 
         {profile && <nav className="bottom-nav" aria-label="প্রধান নেভিগেশন">
-          {[['home', Home, 'হোম'], ['health', HeartPulse, 'স্বাস্থ্য'], ['activity', Activity, 'কার্যকলাপ'], ['profile', CircleUserRound, 'প্রোফাইল']].map(([id, Icon, label]) => <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}><Icon size={22} /><span>{label}</span></button>)}
+          {[['home', Home, 'হোম'], ['health', HeartPulse, 'স্বাস্থ্য'], ['family', UsersRound, 'পরিবার'], ['activity', Activity, 'কার্যকলাপ'], ['profile', CircleUserRound, 'প্রোফাইল']].map(([id, Icon, label]) => <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}><Icon size={22} /><span>{label}</span></button>)}
         </nav>}
 
         <footer className="app-footer"><span>{APP_VERSION}</span><span className="footer-divider" /><span>গাজোল পাইলট</span></footer>
@@ -500,6 +586,10 @@ function App() {
       {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
 
       {assignmentOpen && <div className="modal-backdrop" role="presentation" onClick={() => setAssignmentOpen(false)}><form className="modal-card assignment-modal" onSubmit={saveBuddyAssignment} onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setAssignmentOpen(false)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol modal-symbol-teal"><UsersRound size={30} /></div><p className="eyebrow mt-5 text-teal-700">সহায়ক assignment</p><h2 className="mt-2 text-2xl font-bold text-slate-900">আপনার সহায়ক বদলান</h2><p className="mt-3 text-sm leading-6 text-slate-600">যিনি নিয়মিত আপনার খবর নিতে পারবেন, তাঁর তথ্য এখানে রাখুন।</p><label className="modal-form-field"><span>সহায়কের নাম</span><input value={buddyValues.name} onChange={(event) => setBuddyValues((previous) => ({ ...previous, name: event.target.value }))} placeholder="যেমন: মিতালি দাস" /></label><label className="modal-form-field"><span>ফোন নম্বর</span><input value={buddyValues.phone} onChange={(event) => setBuddyValues((previous) => ({ ...previous, phone: event.target.value }))} placeholder="১০ অঙ্কের ফোন নম্বর" inputMode="tel" /></label><label className="modal-form-field"><span>সহায়কের ধরন</span><select value={buddyValues.type} onChange={(event) => setBuddyValues((previous) => ({ ...previous, type: event.target.value }))}><option>ASHA সহায়ক</option><option>Anganwadi কর্মী</option><option>স্থানীয় volunteer</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssignmentOpen(false)}>এখন নয়</button><button type="submit" className="primary-small-button">তথ্য রাখুন</button></div></form></div>}
+
+      {contactOpen && <div className="modal-backdrop" role="presentation" onClick={() => setContactOpen(false)}><form className="modal-card assignment-modal" onSubmit={saveEmergencyContact} onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setContactOpen(false)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol modal-symbol-teal"><UserPlus size={30} /></div><p className="eyebrow mt-5 text-teal-700">নতুন যোগাযোগ</p><h2 className="mt-2 text-2xl font-bold text-slate-900">Emergency contact যোগ করুন</h2><p className="mt-3 text-sm leading-6 text-slate-600">যিনি জরুরি সময়ে elder-এর খবর নিতে পারবেন, তাঁর তথ্য রাখুন।</p><label className="modal-form-field"><span>নাম</span><input value={contactValues.name} onChange={(event) => setContactValues((previous) => ({ ...previous, name: event.target.value }))} placeholder="যেমন: পাপিয়া দেবী" /></label><label className="modal-form-field"><span>সম্পর্ক</span><input value={contactValues.relationship} onChange={(event) => setContactValues((previous) => ({ ...previous, relationship: event.target.value }))} placeholder="যেমন: মেয়ে / প্রতিবেশী" /></label><label className="modal-form-field"><span>ফোন নম্বর</span><input value={contactValues.phone} onChange={(event) => setContactValues((previous) => ({ ...previous, phone: event.target.value }))} placeholder="১০ অঙ্কের ফোন নম্বর" inputMode="tel" /></label><label className="modal-form-field"><span>Priority</span><select value={contactValues.priority} onChange={(event) => setContactValues((previous) => ({ ...previous, priority: event.target.value }))}><option value="secondary">Secondary contact</option><option value="primary">Primary contact</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setContactOpen(false)}>এখন নয়</button><button type="submit" className="primary-small-button">যোগ করুন</button></div></form></div>}
+
+      {reportOpen && <div className="modal-backdrop" role="presentation" onClick={() => setReportOpen(false)}><div className="modal-card report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setReportOpen(false)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol modal-symbol-teal"><FileText size={30} /></div><p className="eyebrow mt-5 text-teal-700">wellness summary</p><h2 id="report-title" className="mt-2 text-2xl font-bold text-slate-900">Health summary report</h2><p className="mt-3 text-sm leading-6 text-slate-600">এটি আপনার entry-র plain-text summary। কোনো diagnosis বা treatment advice এতে নেই।</p><pre className="report-preview">{healthReport}</pre><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setReportOpen(false)}>বন্ধ করুন</button><button type="button" className="primary-small-button" onClick={downloadHealthReport}><FileText size={16} /> .txt download</button></div></div></div>}
 
       {modal && <div className="modal-backdrop" role="presentation" onClick={() => setModal(null)}><div className={`modal-card ${modal === 'ambulance' ? 'modal-amber' : 'modal-red'}`} role="dialog" aria-modal="true" aria-labelledby="emergency-title" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setModal(null)} aria-label="বন্ধ করুন"><X size={21} /></button><div className="modal-symbol">{modal === 'ambulance' ? <Ambulance size={32} /> : <LifeBuoy size={32} />}</div><p className="eyebrow mt-5">জরুরি সাহায্য</p><h2 id="emergency-title" className="mt-2 text-2xl font-bold text-slate-900">{modal === 'ambulance' ? 'অ্যাম্বুলেন্স প্রয়োজন?' : 'আপনার কি এখনই সাহায্য দরকার?'}</h2><p className="mt-3 text-sm leading-6 text-slate-600">{modal === 'ambulance' ? 'এই flow-টি আপনার সহায়ক ও পরিবারকে জানাবে। এরপর আপনি ১০৮-এ ফোন করার সুযোগ পাবেন।' : 'একবার confirm করলে আপনার buddy এবং নিবন্ধিত পরিবারের সদস্য—দুজনকেই সঙ্গে সঙ্গে alert পাঠানো হবে।'}</p>{modal === 'sos' && <div className="recipient-preview"><div><UsersRound size={16} /><span>সহায়ক</span><strong>{buddy.name}</strong></div><div><CircleUserRound size={16} /><span>পরিবার</span><strong>{familyContact.name}</strong></div></div>}<div className="location-note"><LocateFixed size={18} /><span>{isOnline ? 'GPS permission দিলে অবস্থান alert-এর সঙ্গে যাবে; না দিলেও alert যাবে' : 'অফলাইন—alert ফোনে রাখা হবে, GPS না গেলে ফোনে সাহায্য নিন'}</span></div><div className="modal-actions"><button className="secondary-button" onClick={() => setModal(null)}>এখন নয়</button><button className="danger-button" onClick={() => sendEmergency(modal)} disabled={emergencySending}>{emergencySending ? 'পাঠানো হচ্ছে…' : modal === 'ambulance' ? 'সতর্ক করে ১০৮ দেখান' : 'দুজনকেই alert করুন'}</button></div>{modal === 'ambulance' && <a className="call-108-link" href="tel:108"><Phone size={17} /> ১০৮-এ ফোন করুন</a>}</div></div>}
     </div>
