@@ -8,18 +8,22 @@ import {
   ChevronRight,
   CircleUserRound,
   Clock3,
+  Frown,
   HeartPulse,
   Home,
   Info,
   LifeBuoy,
   LocateFixed,
   MapPin,
+  Meh,
   Mic,
   MicOff,
   Phone,
   RefreshCw,
   ShieldCheck,
   Siren,
+  Smile,
+  Thermometer,
   UsersRound,
   Wifi,
   WifiOff,
@@ -29,6 +33,24 @@ import {
 const STORAGE_KEY = 'sanket-sneho-phase1';
 const APP_VERSION = 'Phase 1 • Test mode';
 
+const emptyHealthForm = {
+  mood: '',
+  sleep: '',
+  appetite: '',
+  medicine: '',
+  temperature: '',
+  pulse: '',
+  systolic: '',
+  diastolic: '',
+  note: '',
+};
+
+const moodOptions = [
+  { value: 'good', label: 'ভালো', hint: 'মন ভালো আছে', icon: Smile },
+  { value: 'okay', label: 'মোটামুটি', hint: 'সামান্য অস্বস্তি', icon: Meh },
+  { value: 'low', label: 'মন খারাপ', hint: 'কারও সঙ্গে বলুন', icon: Frown },
+];
+
 const defaultData = {
   profile: null,
   buddy: { name: 'মিতালি দাস', phone: '9830012345', type: 'ASHA সহায়ক' },
@@ -37,6 +59,7 @@ const defaultData = {
   alert: null,
   emergencyAlert: null,
   emergencyLog: [],
+  healthLogs: [],
 };
 
 function readSavedData() {
@@ -81,12 +104,15 @@ function App() {
   const [modal, setModal] = useState(null);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [emergencySending, setEmergencySending] = useState(false);
+  const [healthValues, setHealthValues] = useState(emptyHealthForm);
   const [onboardingValues, setOnboardingValues] = useState({ displayName: '', phone: '', villageName: '', wardNumber: '' });
   const [buddyValues, setBuddyValues] = useState({ name: '', phone: '', type: 'ASHA সহায়ক' });
   const recognitionRef = useRef(null);
   const profile = data.profile || null;
   const buddy = data.buddy || defaultData.buddy;
   const familyContact = data.familyContact || defaultData.familyContact;
+  const healthLogs = data.healthLogs || [];
+  const latestHealthLog = healthLogs[0] || null;
   const elderName = profile?.displayName || 'সরস্বতী দেবী';
   const elderInitial = elderName.trim().charAt(0) || 'স';
 
@@ -133,6 +159,49 @@ function App() {
       profile: { ...cleaned, role: 'elder', createdAt: new Date().toISOString() },
     }));
     showToast('আপনার প্রোফাইল তৈরি হয়েছে। স্বাগতম।');
+  };
+
+  const toggleHealthRoutine = (field) => {
+    setHealthValues((previous) => ({ ...previous, [field]: previous[field] === 'yes' ? '' : 'yes' }));
+  };
+
+  const saveHealthLog = (event) => {
+    event.preventDefault();
+    if (!healthValues.mood) {
+      showToast('আজ মন কেমন আছে—একটি option বেছে নিন।');
+      return;
+    }
+    const numericLimits = {
+      temperature: [30, 45],
+      pulse: [30, 220],
+      systolic: [50, 250],
+      diastolic: [30, 150],
+    };
+    for (const [field, [minimum, maximum]] of Object.entries(numericLimits)) {
+      if (healthValues[field] && (!Number.isFinite(Number(healthValues[field])) || Number(healthValues[field]) < minimum || Number(healthValues[field]) > maximum)) {
+        showToast('ভাইটাল তথ্যের সংখ্যাটি আবার দেখে লিখুন।');
+        return;
+      }
+    }
+    const mood = moodOptions.find((option) => option.value === healthValues.mood);
+    const log = {
+      id: `health-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      syncState: isOnline ? 'synced' : 'waiting_to_sync',
+      mood: healthValues.mood,
+      moodLabel: mood?.label || 'নথিভুক্ত',
+      sleep: healthValues.sleep,
+      appetite: healthValues.appetite,
+      medicine: healthValues.medicine,
+      temperature: healthValues.temperature,
+      pulse: healthValues.pulse,
+      systolic: healthValues.systolic,
+      diastolic: healthValues.diastolic,
+      note: healthValues.note.trim(),
+    };
+    setData((previous) => ({ ...previous, healthLogs: [log, ...(previous.healthLogs || [])].slice(0, 14) }));
+    setHealthValues(emptyHealthForm);
+    showToast(isOnline ? 'আজকের স্বাস্থ্য-খোঁজ রাখা হয়েছে।' : 'স্বাস্থ্য-খোঁজ ফোনে রাখা হয়েছে—ইন্টারনেট এলে সিঙ্ক হবে।');
   };
 
   const checkIn = () => {
@@ -339,6 +408,10 @@ function App() {
         <div className="mt-3 flex items-center justify-center gap-2 text-xs font-semibold text-slate-400"><Clock3 size={14} /> প্রতিদিন সন্ধ্যা ৬টার মধ্যে</div>
       </section>
 
+      <section className="health-preview-card">
+        <div className="flex min-w-0 items-start gap-3"><div className="health-preview-icon"><HeartPulse size={22} /></div><div className="min-w-0"><p className="eyebrow text-teal-700">শরীর ও মন</p><h3 className="mt-1 text-xl font-bold text-slate-900">আজ কেমন আছেন?</h3><p className="mt-1 truncate text-sm text-slate-500">{latestHealthLog ? `আজ ${latestHealthLog.moodLabel} অনুভব করছেন` : 'প্রতিদিনের ছোট্ট স্বাস্থ্য-খোঁজ লিখুন'}</p></div></div><button className="health-open-button" onClick={() => setTab('health')} aria-label="স্বাস্থ্য check-in খুলুন"><HeartPulse size={19} /><span>লগ করুন</span></button>
+      </section>
+
       <section className="grid grid-cols-2 gap-3">
         <button className="quick-action quick-action-sos" onClick={() => setModal('sos')}>
           <span className="quick-icon"><LifeBuoy size={24} /></span>
@@ -364,6 +437,21 @@ function App() {
         </button>
       </section>
     </>
+  );
+
+  const renderHealth = () => (
+    <section className="space-y-4">
+      <div className="page-title-block"><p className="eyebrow text-teal-700">প্রতিদিনের স্বাস্থ্য-খোঁজ</p><h2 className="mt-1 text-3xl font-bold text-slate-900">শরীর ও মন</h2><p className="mt-2 text-sm leading-6 text-slate-500">আজ আপনার mood, routine এবং optional vital তথ্য লিখে রাখুন।</p></div>
+      <div className="health-safety-note"><ShieldCheck size={19} /><p><strong>এটি শুধু আপনার record।</strong><br />এই app কোনো diagnosis বা treatment advice দেয় না। কোনো অসুবিধা হলে qualified clinician-এর সাহায্য নিন।</p></div>
+      <form className="health-form" onSubmit={saveHealthLog}>
+        <div className="health-form-section"><div className="health-section-heading"><div><p className="eyebrow text-saffron-700">১ • মনের অবস্থা</p><h3 className="mt-1 text-lg font-bold text-slate-900">আজ মন কেমন?</h3></div><HeartPulse className="text-saffron-500" size={25} /></div><div className="mood-grid">{moodOptions.map(({ value, label, hint, icon: Icon }) => <button key={value} type="button" className={`mood-option mood-${value} ${healthValues.mood === value ? 'selected' : ''}`} onClick={() => setHealthValues((previous) => ({ ...previous, mood: value }))}><Icon size={27} /><strong>{label}</strong><small>{hint}</small></button>)}</div></div>
+        <div className="health-form-section"><div className="health-section-heading"><div><p className="eyebrow text-teal-700">২ • routine check</p><h3 className="mt-1 text-lg font-bold text-slate-900">আজকের যত্ন</h3></div><Check className="text-teal-500" size={25} /></div><div className="routine-grid">{[['sleep', 'ভালো ঘুম হয়েছে'], ['appetite', 'খাবার খেয়েছি'], ['medicine', 'নিয়মিত ওষুধ নিয়েছি']].map(([field, label]) => <button key={field} type="button" className={`routine-option ${healthValues[field] === 'yes' ? 'selected' : ''}`} onClick={() => toggleHealthRoutine(field)}><span className="routine-check">{healthValues[field] === 'yes' ? <Check size={17} /> : null}</span><span>{label}</span></button>)}</div></div>
+        <div className="health-form-section"><div className="health-section-heading"><div><p className="eyebrow text-teal-700">৩ • optional vitals</p><h3 className="mt-1 text-lg font-bold text-slate-900">আজকের মাপ (ইচ্ছা হলে)</h3></div><Thermometer className="text-teal-500" size={25} /></div><p className="vitals-helper">যন্ত্রে মাপা থাকলে শুধু record করুন—app ফলাফল ব্যাখ্যা করছে না।</p><div className="vitals-grid"><label className="vital-field"><span>তাপমাত্রা (°C)</span><input value={healthValues.temperature} onChange={(event) => setHealthValues((previous) => ({ ...previous, temperature: event.target.value }))} placeholder="যেমন 36.8" inputMode="decimal" /></label><label className="vital-field"><span>Pulse / মিনিট</span><input value={healthValues.pulse} onChange={(event) => setHealthValues((previous) => ({ ...previous, pulse: event.target.value }))} placeholder="যেমন 72" inputMode="numeric" /></label><label className="vital-field"><span>BP উপরে</span><input value={healthValues.systolic} onChange={(event) => setHealthValues((previous) => ({ ...previous, systolic: event.target.value }))} placeholder="যেমন 120" inputMode="numeric" /></label><label className="vital-field"><span>BP নিচে</span><input value={healthValues.diastolic} onChange={(event) => setHealthValues((previous) => ({ ...previous, diastolic: event.target.value }))} placeholder="যেমন 80" inputMode="numeric" /></label></div></div>
+        <label className="health-note-field"><span>আজকের ছোট্ট নোট <em>ঐচ্ছিক</em></span><textarea value={healthValues.note} onChange={(event) => setHealthValues((previous) => ({ ...previous, note: event.target.value }))} placeholder="যেমন: সকালে একটু হাঁটলাম" rows="3" /></label>
+        <button type="submit" className="health-save-button"><Check size={20} /> আজকের স্বাস্থ্য-খোঁজ রাখুন</button>
+      </form>
+      <div className="health-history"><div className="section-heading"><div><p className="eyebrow text-teal-700">আপনার record</p><h3 className="mt-1 text-xl font-bold text-slate-900">সাম্প্রতিক স্বাস্থ্য-খোঁজ</h3></div><span className="history-count">{healthLogs.length}টি</span></div>{healthLogs.length === 0 ? <div className="empty-health-state"><HeartPulse size={22} /><p>এখনও কোনো স্বাস্থ্য-খোঁজ রাখা হয়নি। আজকের mood দিয়ে শুরু করুন।</p></div> : <div className="health-history-list">{healthLogs.slice(0, 5).map((log) => <div className="health-history-item" key={log.id}><div className={`history-mood history-mood-${log.mood}`}><HeartPulse size={17} /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><strong>{log.moodLabel}</strong><time>{formatDate(log.createdAt)}</time></div><p>{[log.sleep === 'yes' && 'ঘুম', log.appetite === 'yes' && 'খাবার', log.medicine === 'yes' && 'ওষুধ'].filter(Boolean).join(' • ') || 'routine record নেই'}</p>{(log.temperature || log.pulse || log.systolic || log.diastolic) && <small>মাপ রাখা হয়েছে: {[log.temperature && `${log.temperature}°C`, log.pulse && `pulse ${log.pulse}`, log.systolic && log.diastolic && `BP ${log.systolic}/${log.diastolic}`].filter(Boolean).join(' • ')}</small>}</div></div>)}</div>}</div>
+    </section>
   );
 
   const renderActivity = () => (
@@ -397,12 +485,13 @@ function App() {
         <main className={`main-content ${!profile ? 'onboarding-content' : ''}`}>
           {!profile && renderOnboarding()}
           {profile && tab === 'home' && renderHome()}
+          {profile && tab === 'health' && renderHealth()}
           {profile && tab === 'activity' && renderActivity()}
           {profile && tab === 'profile' && renderProfile()}
         </main>
 
         {profile && <nav className="bottom-nav" aria-label="প্রধান নেভিগেশন">
-          {[['home', Home, 'হোম'], ['activity', Activity, 'কার্যকলাপ'], ['profile', CircleUserRound, 'প্রোফাইল']].map(([id, Icon, label]) => <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}><Icon size={22} /><span>{label}</span></button>)}
+          {[['home', Home, 'হোম'], ['health', HeartPulse, 'স্বাস্থ্য'], ['activity', Activity, 'কার্যকলাপ'], ['profile', CircleUserRound, 'প্রোফাইল']].map(([id, Icon, label]) => <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}><Icon size={22} /><span>{label}</span></button>)}
         </nav>}
 
         <footer className="app-footer"><span>{APP_VERSION}</span><span className="footer-divider" /><span>গাজোল পাইলট</span></footer>

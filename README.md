@@ -54,3 +54,7 @@ docs/
 ## Next build step
 
 The next implementation iteration should add the backend contract and authenticated role flows for elder, buddy, family, and block staff. The first gate remains a simulated missed check-in that is visible to a second buddy device, followed by a documented offline, duplicate-tap, permission-denied, and no-response test run.
+
+## Routine health logging
+
+The current MVP also includes a Bengali-first `স্বাস্থ্য` tab for daily wellness logging. An elder can record mood, sleep, food, medicine routine, optional temperature, pulse, blood pressure values, and a short note. Entries are stored locally for the prototype and shown in recent history. The feature is intentionally non-diagnostic: it records user-entered values but does not interpret them or provide treatment advice.
