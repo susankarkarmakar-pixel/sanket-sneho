@@ -75,7 +75,11 @@ function App() {
   const [transcript, setTranscript] = useState('');
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState(null);
+  const [onboardingValues, setOnboardingValues] = useState({ displayName: '', phone: '', villageName: '', wardNumber: '' });
   const recognitionRef = useRef(null);
+  const profile = data.profile || null;
+  const elderName = profile?.displayName || 'সরস্বতী দেবী';
+  const elderInitial = elderName.trim().charAt(0) || 'স';
 
   const hasCheckedIn = isToday(data.checkin?.timestamp);
   const alertStatus = data.alert?.status || (hasCheckedIn ? 'checked_in' : 'pending');
@@ -107,6 +111,20 @@ function App() {
   }, [showToast]);
 
   useEffect(() => () => recognitionRef.current?.stop(), []);
+
+  const completeOnboarding = (event) => {
+    event.preventDefault();
+    const cleaned = Object.fromEntries(Object.entries(onboardingValues).map(([key, value]) => [key, value.trim()]));
+    if (!cleaned.displayName || !cleaned.phone || !cleaned.villageName) {
+      showToast('নাম, ফোন নম্বর এবং গ্রামের নাম লিখুন।');
+      return;
+    }
+    setData((previous) => ({
+      ...previous,
+      profile: { ...cleaned, role: 'elder', createdAt: new Date().toISOString() },
+    }));
+    showToast('আপনার প্রোফাইল তৈরি হয়েছে। স্বাগতম।');
+  };
 
   const checkIn = () => {
     const timestamp = new Date().toISOString();
@@ -186,6 +204,25 @@ function App() {
 
   const StatusIcon = status.icon;
 
+  const renderOnboarding = () => (
+    <section className="onboarding-wrap">
+      <div className="onboarding-intro">
+        <div className="onboarding-symbol"><HeartPulse size={31} /></div>
+        <p className="eyebrow text-teal-700">প্রথমবারের পরিচয়</p>
+        <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-900">আপনার পাশে থাকতে<br />কিছু তথ্য জানাবেন?</h1>
+        <p className="mt-3 text-[15px] leading-7 text-slate-600">শুধু আপনার নাম, ফোন এবং গ্রামের নাম লিখুন। আপনার তথ্য ব্যক্তিগত থাকবে এবং পরে বদলানো যাবে।</p>
+      </div>
+      <form className="onboarding-form" onSubmit={completeOnboarding}>
+        <label className="form-field"><span>আপনার নাম <b>*</b></span><input value={onboardingValues.displayName} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, displayName: event.target.value }))} placeholder="যেমন: সরস্বতী দেবী" autoComplete="name" /></label>
+        <label className="form-field"><span>ফোন নম্বর <b>*</b></span><input value={onboardingValues.phone} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, phone: event.target.value }))} placeholder="১০ অঙ্কের ফোন নম্বর" inputMode="tel" autoComplete="tel" /></label>
+        <label className="form-field"><span>গ্রামের নাম <b>*</b></span><input value={onboardingValues.villageName} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, villageName: event.target.value }))} placeholder="যেমন: কাশিমপুর" /></label>
+        <label className="form-field"><span>ওয়ার্ড নম্বর <em>ঐচ্ছিক</em></span><input value={onboardingValues.wardNumber} onChange={(event) => setOnboardingValues((previous) => ({ ...previous, wardNumber: event.target.value }))} placeholder="যেমন: ৭" inputMode="numeric" /></label>
+        <div className="onboarding-consent"><ShieldCheck size={19} /><span>আপনার তথ্য শুধু নিরাপত্তা ও সহায়তার কাজে ব্যবহার করা হবে।</span></div>
+        <button className="onboarding-submit" type="submit"><span>শুরু করি</span><ChevronRight size={21} /></button>
+      </form>
+    </section>
+  );
+
   const renderHome = () => (
     <>
       <section className="hero-card">
@@ -195,15 +232,15 @@ function App() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="eyebrow text-teal-100">আজকের খোঁজ</p>
-              <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">নমস্কার, সরস্বতী দেবী</h2>
+              <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">নমস্কার, {elderName}</h2>
               <p className="mt-2 text-base text-teal-50/80">আপনি একা নন—আমরা আপনার পাশে আছি।</p>
             </div>
-            <div className="avatar-mark" aria-hidden="true">স</div>
+            <div className="avatar-mark" aria-hidden="true">{elderInitial}</div>
           </div>
 
           <div className="mt-7 flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-3 text-sm text-teal-50 ring-1 ring-white/10">
             <MapPin size={17} />
-            <span>গাজোল ব্লক, মালদা</span>
+            <span>{profile?.villageName || 'গাজোল'}{profile?.wardNumber ? ` • ওয়ার্ড ${profile.wardNumber}` : ''}, মালদা</span>
             <span className="ml-auto text-teal-100/70">সহায়ক: মিতালি দি</span>
           </div>
         </div>
@@ -277,7 +314,7 @@ function App() {
   const renderProfile = () => (
     <section className="space-y-4">
       <div className="page-title-block"><p className="eyebrow text-teal-700">আপনার পরিচয়</p><h2 className="mt-1 text-3xl font-bold text-slate-900">প্রোফাইল</h2></div>
-      <div className="profile-card"><div className="profile-avatar">স</div><div><h3 className="text-xl font-bold text-slate-900">সরস্বতী দেবী</h3><p className="mt-1 text-sm text-slate-500">Elder profile • Gazole, Malda</p></div><button className="icon-button ml-auto" aria-label="প্রোফাইল তথ্য"><Info size={19} /></button></div>
+      <div className="profile-card"><div className="profile-avatar">{elderInitial}</div><div><h3 className="text-xl font-bold text-slate-900">{elderName}</h3><p className="mt-1 text-sm text-slate-500">Elder profile • Gazole, Malda</p></div><button className="icon-button ml-auto" aria-label="প্রোফাইল তথ্য"><Info size={19} /></button></div>
       <div className="info-card"><p className="eyebrow text-slate-400">আমার পাশে আছেন</p><div className="mt-4 flex items-center gap-3"><div className="buddy-avatar">মি</div><div className="flex-1"><p className="font-bold text-slate-900">মিতালি দাস</p><p className="mt-1 text-sm text-slate-500">ASHA সহায়ক • ৯৮৩০০ ১২৩৪৫৬</p></div><a href="tel:+9198300123456" className="call-button" aria-label="মিতালিকে কল করুন"><Phone size={19} /></a></div></div>
       <div className="privacy-note"><ShieldCheck size={20} className="mt-0.5 shrink-0 text-teal-700" /><p><strong>আপনার তথ্য ব্যক্তিগত।</strong><br />শুধু আপনার সহায়ক ও নিবন্ধিত পরিবারের সদস্যরা আপনার নিরাপত্তার খবর দেখতে পারবেন।</p></div>
       <div className="info-card flex items-center gap-3"><div className={`mini-icon ${isOnline ? 'mini-icon-teal' : 'mini-icon-amber'}`}>{isOnline ? <Wifi size={21} /> : <WifiOff size={21} />}</div><div><p className="font-bold text-slate-900">সংযোগের অবস্থা</p><p className="mt-1 text-sm text-slate-500">{isOnline ? 'ইন্টারনেট সংযুক্ত' : 'অফলাইন • তথ্য ফোনে রাখা হচ্ছে'}</p></div></div>
@@ -292,15 +329,16 @@ function App() {
           <div className="topbar-actions"><span className={`connection-pill ${isOnline ? 'online' : 'offline'}`}>{isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}{isOnline ? 'অনলাইন' : 'অফলাইন'}</span><button className="profile-chip" onClick={() => setTab('profile')} aria-label="প্রোফাইল খুলুন"><CircleUserRound size={22} /></button></div>
         </header>
 
-        <main className="main-content">
-          {tab === 'home' && renderHome()}
-          {tab === 'activity' && renderActivity()}
-          {tab === 'profile' && renderProfile()}
+        <main className={`main-content ${!profile ? 'onboarding-content' : ''}`}>
+          {!profile && renderOnboarding()}
+          {profile && tab === 'home' && renderHome()}
+          {profile && tab === 'activity' && renderActivity()}
+          {profile && tab === 'profile' && renderProfile()}
         </main>
 
-        <nav className="bottom-nav" aria-label="প্রধান নেভিগেশন">
+        {profile && <nav className="bottom-nav" aria-label="প্রধান নেভিগেশন">
           {[['home', Home, 'হোম'], ['activity', Activity, 'কার্যকলাপ'], ['profile', CircleUserRound, 'প্রোফাইল']].map(([id, Icon, label]) => <button key={id} className={`nav-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}><Icon size={22} /><span>{label}</span></button>)}
-        </nav>
+        </nav>}
 
         <footer className="app-footer"><span>{APP_VERSION}</span><span className="footer-divider" /><span>গাজোল পাইলট</span></footer>
       </div>
